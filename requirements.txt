@@ -1,0 +1,6 @@
+netmiko
+gitpython
+python-dotenv
+requests
+streamlit
+pandas

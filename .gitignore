@@ -1,0 +1,15 @@
+# File Rahasia (Password/Token) - JANGAN DIUPLOAD
+.env
+
+# Folder Data Backup (Ini nanti punya Repo sendiri) - JANGAN DIUPLOAD KE REPO APLIKASI
+backups/
+
+# Folder Log
+logs/
+
+# File Sampah Python
+__pycache__/
+*.pyc
+
+# Folder Virtual Environment
+venv/
