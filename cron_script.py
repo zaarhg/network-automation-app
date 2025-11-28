@@ -1,20 +1,19 @@
-# Script ini dipanggil oleh Cron Job Linux
+# Script ini dipanggil oleh Cron Job Linux tiap menit
 from backend import run_backup_task, load_inventory
 import datetime
 
-# Ambil waktu sekarang untuk log
+# Timestamp untuk log file
 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-print(f"--- [CRON START] {now} ---")
+print(f"--- [CRON RUN] {now} ---")
 
 try:
     inventory = load_inventory()
     for r in inventory['routers']:
-        # Panggil fungsi backup dari backend
+        # Panggil fungsi backup dari backend.py
         success, status, msg = run_backup_task(r['hostname'], r['ip'], r['device_type'])
         
-        # Print hasil agar terekam di file log (logs/cron.log)
         if status == "Changed":
-            print(f"[CHANGE] {r['hostname']}: Config berubah! Backup disimpan.")
+            print(f"[CHANGE] {r['hostname']}: Config Berubah -> {msg}")
         elif status == "No Change":
             print(f"[SKIP]   {r['hostname']}: Tidak ada perubahan.")
         else:
@@ -23,4 +22,4 @@ try:
 except Exception as e:
     print(f"[FATAL ERROR] {e}")
 
-print("--- [CRON END] ---\n")
+print("--------------------------\n")

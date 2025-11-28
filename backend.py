@@ -5,6 +5,7 @@ import re
 from netmiko import ConnectHandler, file_transfer
 from datetime import datetime
 from dotenv import load_dotenv
+from notifications import send_alert  # <--- INI TAMBAHAN BARU
 
 # --- KONFIGURASI ---
 load_dotenv()
@@ -13,7 +14,7 @@ PASS = os.getenv("ROUTER_PASSWORD")
 BACKUP_DIR = "backups"
 INVENTORY_FILE = "inventory.yaml"
 
-# Init Git jika belum ada (Auto-Create)
+# Init Git jika belum ada
 if not os.path.exists(BACKUP_DIR):
     os.makedirs(BACKUP_DIR)
 try:
@@ -22,32 +23,30 @@ except:
     REPO = git.Repo.init(BACKUP_DIR)
 
 def load_inventory():
-    """Membaca daftar router dari YAML"""
     with open(INVENTORY_FILE, 'r') as f:
         return yaml.safe_load(f)
 
-# --- FUNGSI 1: BACKUP ---
+# --- FUNGSI 1: BACKUP CORE ---
 def run_backup_task(hostname, ip, device_type):
-    """Melakukan SSH, ambil config, simpan, dan commit git"""
     device = {
         'device_type': device_type, 'host': ip,
         'username': USER, 'password': PASS, 'port': 22
     }
     
     try:
-        # 1. Koneksi
+        # 1. Koneksi SSH
         net_connect = ConnectHandler(**device)
         net_connect.enable()
         
         # 2. Ambil Config
         raw = net_connect.send_command("show running-config")
         
-        # 3. Bersihkan Regex (Timestamp)
+        # 3. Bersihkan Regex
         clean = re.sub(r"^! Last configuration.*", "", raw, flags=re.MULTILINE)
         clean = re.sub(r"^! NVRAM config.*", "", clean, flags=re.MULTILINE)
         clean = clean.strip()
         
-        # 4. Simpan File
+        # 4. Simpan File ke Lokal
         filename = f"{hostname}.cfg"
         filepath = os.path.join(BACKUP_DIR, filename)
         
@@ -58,11 +57,10 @@ def run_backup_task(hostname, ip, device_type):
         REPO.index.add([filename])
         has_changes = False
         
-        # Cek apakah ada perubahan dibanding commit sebelumnya
         if REPO.head.is_valid():
             if len(REPO.index.diff("HEAD")) > 0: has_changes = True
         else:
-            has_changes = True # Commit pertama
+            has_changes = True 
             
         status = "No Change"
         msg = "Config identik."
@@ -70,18 +68,40 @@ def run_backup_task(hostname, ip, device_type):
         if has_changes:
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             REPO.index.commit(f"Backup {hostname} at {ts}")
+            
+            # --- AUTO PUSH KE GITHUB ---
+            push_msg = ""
+            try:
+                if 'origin' in REPO.remotes:
+                    REPO.remote('origin').push()
+                    push_msg = " & Cloud Uploaded ☁️"
+            except Exception as e:
+                push_msg = " (Cloud Error)"
+            
             status = "Changed"
-            msg = "Perubahan terdeteksi & disimpan."
+            msg = f"Perubahan disimpan{push_msg}"
+
+            # === KIRIM NOTIFIKASI TELEGRAM (SUCCESS) ===
+            send_alert(
+                title="CONFIG CHANGE DETECTED",
+                message=f"Router: `{hostname}`\nWaktu: {ts}\nStatus: {msg}",
+                status="warning"
+            )
             
         net_connect.disconnect()
         return True, status, msg
 
     except Exception as e:
+        # === KIRIM NOTIFIKASI TELEGRAM (ERROR) ===
+        send_alert(
+            title="BACKUP FAILED",
+            message=f"Router: `{hostname}`\nError: {str(e)}",
+            status="error"
+        )
         return False, "Error", str(e)
 
-# --- FUNGSI 2: RESTORE ---
+# --- FUNGSI 2: RESTORE CORE ---
 def run_restore_task(hostname, ip, device_type, commit_hex):
-    """Time Travel: Checkout Git masa lalu -> Upload ke Router -> Restore"""
     device = {
         'device_type': device_type, 'host': ip,
         'username': USER, 'password': PASS, 'port': 22
@@ -90,11 +110,9 @@ def run_restore_task(hostname, ip, device_type, commit_hex):
     filename = f"{hostname}.cfg"
     
     try:
-        # A. Checkout file lokal ke versi masa lalu (Git)
         REPO.git.checkout(commit_hex, "--", filename)
         local_file = os.path.join(BACKUP_DIR, filename)
         
-        # B. Upload file ke Router (SCP/Netmiko)
         net_connect = ConnectHandler(**device)
         net_connect.enable()
         
@@ -103,34 +121,41 @@ def run_restore_task(hostname, ip, device_type, commit_hex):
             file_system='flash:', direction='put', overwrite_file=True
         )
         
-        # C. Eksekusi Restore (Configure Replace)
         cmd = "configure replace flash:/restore_candidate.cfg force"
-        # Timeout lama karena router butuh waktu loading
         output = net_connect.send_command(cmd, expect_string=r"#", read_timeout=90)
         net_connect.disconnect()
         
-        # D. Kembalikan file lokal ke masa depan (HEAD) agar folder tetap update
         REPO.git.checkout("HEAD", "--", filename)
         
-        # Cek jika router rollback (gagal)
         if "Rollback Done" in output:
             return False, "Router menolak config (Rollback terjadi)."
+        
+        # === NOTIFIKASI RESTORE SUKSES ===
+        send_alert(
+            title="SYSTEM RESTORED",
+            message=f"Router `{hostname}` berhasil dipulihkan ke versi `{commit_hex[:7]}`.",
+            status="success"
+        )
         
         return True, "Restore Berhasil!"
         
     except Exception as e:
-        # Safety: Reset git jika crash di tengah jalan
         try: REPO.git.checkout("HEAD", "--", filename) 
         except: pass
+        
+        # Notifikasi Error Restore
+        send_alert(
+            title="RESTORE ERROR",
+            message=f"Gagal restore `{hostname}`.\nError: {str(e)}",
+            status="error"
+        )
         return False, str(e)
 
-# --- FUNGSI 3: UTILITY (Untuk Dashboard) ---
+# --- FUNGSI 3: UTILITY (SMART STABLE SEARCH) ---
 def get_router_history(hostname):
-    """Mengambil daftar riwayat commit untuk router tertentu"""
     filename = f"{hostname}.cfg"
-    # Cek apakah file ada di git history
     try:
-        commits = list(REPO.iter_commits(paths=filename, max_count=10))
+        commits = list(REPO.iter_commits(paths=filename, max_count=15))
     except:
         return []
 
@@ -144,3 +169,26 @@ def get_router_history(hostname):
             "message": c.message.strip()
         })
     return data
+
+def find_smart_stable_commit(hostname):
+    from datetime import timedelta
+    filename = f"{hostname}.cfg"
+    try:
+        commits = list(REPO.iter_commits(paths=filename, max_count=10))
+    except:
+        return None
+
+    if len(commits) < 2:
+        return None 
+
+    best_candidate = commits[1]
+    
+    for i in range(1, len(commits)-1):
+        current = commits[i]
+        newer = commits[i-1]
+        
+        duration = datetime.fromtimestamp(newer.committed_date) - datetime.fromtimestamp(current.committed_date)
+        if duration > timedelta(hours=24):
+            return current
+            
+    return best_candidate
