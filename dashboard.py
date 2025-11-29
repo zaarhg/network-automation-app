@@ -62,8 +62,13 @@ if menu == "📊 Dashboard":
     # Tampilkan tabel inventory
     if routers:
         df = pd.DataFrame(routers)
-        # Rapikan nama kolom
+        
+        # 1. Rapikan nama kolom (Hilangkan underscore, Huruf Besar)
         df.columns = [c.replace('_', ' ').title() for c in df.columns]
+        
+        # 2. Ubah Index agar mulai dari 1 (Bukan 0)
+        df.index = df.index + 1
+        
         st.dataframe(df, use_container_width=True)
     else:
         st.info("Belum ada router terdaftar. Gunakan menu 'Add Device'.")
@@ -278,6 +283,19 @@ elif menu == "ℹ️ Tentang Aplikasi":
 
     st.markdown("---")
 
+   # --- TUJUAN PEMBUATAN (YANG SEMPAT HILANG) ---
+    st.write("### 📌 Latar Belakang Proyek")
+    st.info("""
+    **NetAuto Pro (Network Disaster Recovery Center)** ini dikembangkan sebagai 
+    **Proyek Tugas Akhir** untuk pemenuhan mata kuliah:
+    
+    * 🛡️ **PKIJ** (Perancangan Keamanan Infrastruktur Jaringan)
+    * ⚙️ **PKOJ** (Perancangan Keamanan Operasional Jaringan)
+
+    Dengan Judul **Sistem Backup & Restore Config Otomatis Router/Switch dengan Python**
+    """)
+
+    # --- TIM PENGEMBANG ---
     # --- TIM PENGEMBANG ---
     st.write("### 👨‍💻 Tim Pengembang")
     
@@ -313,7 +331,7 @@ elif menu == "ℹ️ Tentang Aplikasi":
     st.markdown("---")
 
     # --- DESKRIPSI SISTEM (ABSTRAK) - POSISI DI BAWAH ---
-    st.write("### 📝 Deskripsi Sistem (Abstrak Singkat)")
+    st.write("### 📝 Deskripsi Sistem")
     
     st.markdown("""
     Sistem ini adalah platform **Network Configuration Management & Automation** yang dirancang 
