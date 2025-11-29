@@ -192,3 +192,39 @@ def find_smart_stable_commit(hostname):
             return current
             
     return best_candidate
+
+# ... (Kode di atas biarkan saja) ...
+
+# --- FUNGSI 5: TAMBAH ROUTER BARU (ADD DEVICE) ---
+def add_router_to_inventory(hostname, ip, device_type="cisco_ios"):
+    """Menambahkan router baru ke file YAML dengan validasi duplikasi"""
+    
+    # 1. Load data lama
+    try:
+        data = load_inventory()
+    except:
+        data = {'routers': []} # Buat baru jika file kosong
+        
+    # 2. Validasi: Cek apakah Hostname atau IP sudah ada?
+    for r in data['routers']:
+        if r['hostname'] == hostname:
+            return False, f"Hostname '{hostname}' sudah terdaftar!"
+        if r['ip'] == ip:
+            return False, f"IP Address '{ip}' sudah digunakan oleh {r['hostname']}!"
+
+    # 3. Tambahkan data baru
+    new_router = {
+        'hostname': hostname,
+        'ip': ip,
+        'device_type': device_type
+    }
+    data['routers'].append(new_router)
+    
+    # 4. Tulis ulang ke file YAML
+    try:
+        with open(INVENTORY_FILE, 'w') as f:
+            # default_flow_style=False agar formatnya rapi (block style)
+            yaml.dump(data, f, default_flow_style=False)
+        return True, f"Router {hostname} berhasil ditambahkan ke inventory."
+    except Exception as e:
+        return False, f"Gagal menulis file: {str(e)}"
